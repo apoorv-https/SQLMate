@@ -1,0 +1,14 @@
+streamlit
+pandas
+sqlalchemy
+psycopg2-binary
+pymysql
+pymongo
+bcrypt
+langchain-groq
+openpyxl
+python-dotenv
+cryptography
+tabulate
+matplotlib
+plotly
