@@ -225,28 +225,66 @@ with st.expander(f"🔌 Database Connection ({connection_status})", expanded=not
     
     with col1:
         st.subheader("1. Connect Database")
-        db_conn_input = st.text_input(
-            "SQL Connection String", 
-            value=current_connection if current_connection else "",
-            type="password",
-            help="postgresql://user:pass@host/db\nNote: If your password has special characters (e.g. @), you MUST URL-encode them! (e.g. @ -> %40)"
-        )
-        if st.button("Save Connection"):
+        conn_method = st.radio("Connect via:", ["Form (Easy)", "Raw Connection String"], horizontal=True)
+        
+        final_conn_string = None
+        
+        if conn_method == "Form (Easy)":
+            st.caption("Use this if your password has special characters or for Supabase.")
+            col_h, col_p = st.columns([3, 1])
+            with col_h:
+                db_host = st.text_input("Host", placeholder="db.xyz.supabase.co")
+            with col_p:
+                db_port = st.text_input("Port", value="5432", help="For Supabase: Use 6543 (Pooler) if 5432 fails.")
+            
+            db_name = st.text_input("Database Name", value="postgres")
+            
+            col_u, col_pwd = st.columns(2)
+            with col_u:
+                db_user = st.text_input("Username", value="postgres")
+            with col_pwd:
+                db_pass = st.text_input("Password", type="password")
+            
+            if st.button("Connect via Form"):
+                if not (db_host and db_name and db_user and db_pass):
+                    st.error("Please fill all fields.")
+                else:
+                    import urllib.parse
+                    # Encode special characters in password/user
+                    safe_user = urllib.parse.quote_plus(db_user)
+                    safe_pass = urllib.parse.quote_plus(db_pass)
+                    final_conn_string = f"postgresql://{safe_user}:{safe_pass}@{db_host}:{db_port}/{db_name}"
+        
+        else:
+            final_conn_string_input = st.text_input(
+                "SQL Connection String", 
+                value=current_connection if current_connection else "",
+                type="password",
+                help="postgresql://user:pass@host/db"
+            )
+            if st.button("Connect via String"):
+                final_conn_string = final_conn_string_input
+
+        # Check and Save
+        if final_conn_string:
+            if "localhost" in final_conn_string or "127.0.0.1" in final_conn_string:
+                 st.warning("⚠️ You are trying to connect to 'localhost'. If deployed, use a cloud database!")
+            
             try:
-                # Test connection before saving
+                # Test connection
                 from sqlalchemy import create_engine, text
-                engine = create_engine(db_conn_input)
+                engine = create_engine(final_conn_string)
                 with engine.connect() as conn:
                     conn.execute(text("SELECT 1"))
                 
-                auth_mongo.update_thread_db(st.session_state.current_thread_id, db_conn_input)
-                st.success("Connection successful! Saved and ready to chat. 🟢")
-                # Wait a moment for user to see success message before rerun
+                auth_mongo.update_thread_db(st.session_state.current_thread_id, final_conn_string)
+                st.success("Connection successful! Saved. 🟢")
                 import time
-                time.sleep(1)
+                time.sleep(0.5)
                 st.rerun()
             except Exception as e:
                 st.error(f"❌ Connection Failed: {e}")
+
 
 
     with col2:
