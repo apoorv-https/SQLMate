@@ -1,4 +1,11 @@
 import streamlit as st
+# --- Page Config ---
+st.set_page_config(
+    page_title="SQLMate",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 import pandas as pd
 import time
 from dotenv import load_dotenv
@@ -7,13 +14,6 @@ import auth_mongo
 import etl_logic
 from sql_agent import SQLAgent
 
-# --- Page Config ---
-st.set_page_config(
-    page_title="SQLMate",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # --- Custom CSS for Dark Mode & Styling ---
 st.markdown("""
