@@ -1,8 +1,9 @@
 import streamlit as st
 # --- Page Config ---
+LOGO_URL = "https://cdn-icons-png.flaticon.com/512/3067/3067260.png"
 st.set_page_config(
     page_title="SQLMate",
-    page_icon="🤖",
+    page_icon=LOGO_URL,
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -81,7 +82,8 @@ if "current_thread_id" not in st.session_state:
 
 # --- Sidebar: Auth & Navigation ---
 with st.sidebar:
-    st.title("🤖 SQLMate")
+    st.image(LOGO_URL, width=80)
+    st.title(" SQLMate")
     st.markdown("---")
     
     if not st.session_state.user_id:
