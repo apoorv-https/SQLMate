@@ -235,7 +235,7 @@ with st.expander(f"🔌 Database Connection ({connection_status})", expanded=not
             with col_h:
                 db_host = st.text_input("Host", placeholder="db.xyz.supabase.co")
             with col_p:
-                db_port = st.text_input("Port", value="5432", help="For Supabase: Use 6543 (Pooler) if 5432 fails.")
+                db_port = st.text_input("Port", value="6543", help="Default: 6543 (Supabase Pooler). Use 5432 only if you have IPv6 support.")
             
             db_name = st.text_input("Database Name", value="postgres")
             
@@ -267,9 +267,13 @@ with st.expander(f"🔌 Database Connection ({connection_status})", expanded=not
 
         # Check and Save
         if final_conn_string:
+            # Safety Checks
             if "localhost" in final_conn_string or "127.0.0.1" in final_conn_string:
                  st.warning("⚠️ You are trying to connect to 'localhost'. If deployed, use a cloud database!")
             
+            if "supabase.co" in final_conn_string and ":5432" in final_conn_string:
+                st.warning("⚠️ Detected Supabase on Port 5432. If connection fails, try Port 6543 (Pooler) for better compatibility.")
+
             try:
                 # Test connection
                 from sqlalchemy import create_engine, text
@@ -283,7 +287,11 @@ with st.expander(f"🔌 Database Connection ({connection_status})", expanded=not
                 time.sleep(0.5)
                 st.rerun()
             except Exception as e:
-                st.error(f"❌ Connection Failed: {e}")
+                err_msg = str(e)
+                if "Cannot assign requested address" in err_msg or "result too large" in err_msg.lower():
+                    st.error("❌ IPv6/Network Error. Try using Port **6543** (Supabase Pooler) instead of 5432.")
+                else:
+                    st.error(f"❌ Connection Failed: {e}")
 
 
 
