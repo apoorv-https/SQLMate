@@ -8,81 +8,68 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Initialize MongoDB Client
-# Uses st.secrets if available (Streamlit Cloud), otherwise environment variables
-MONGO_URI = os.getenv("MONGO_URI")
-
-if not MONGO_URI:
-    MONGO_URI = os.getenv("MONGODB_URL")
+# ── MongoDB Connection ────────────────────────────────────────────────────────
+MONGO_URI = os.getenv("MONGO_URI") or os.getenv("MONGODB_URL")
 
 if not MONGO_URI:
     try:
-        if "MONGO_URI" in st.secrets:
-            MONGO_URI = st.secrets["MONGO_URI"]
-        elif "MONGODB_URL" in st.secrets:
-            MONGO_URI = st.secrets["MONGODB_URL"]
-    except Exception:
-        pass # Secrets file not found
-
-if not MONGO_URI:
-    st.error("🚨 `MONGO_URI` not found! Please check your `.env` file or Streamlit secrets.")
-    st.stop()
-
-# Validate URI format roughly to prevent "localhost" defaults if garbage is passed
-if "localhost" in MONGO_URI or "127.0.0.1" in MONGO_URI:
-    st.warning("⚠️ You are connecting to `localhost`. If this is deployed or you don't have a local Mongo, this will fail. Use MongoDB Atlas.")
-
-
-try:
-    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000) # 5s timeout instead of 30s
-    # Only verify connection if we actually try to use it, 
-    # but lazy connection is standard. 
-    # We could do client.admin.command('ping') here to fail fast, 
-    # but that slows down startup. Let's rely on the operation failure.
-    db = client.get_database("sentient_sql_db")
-    users_collection = db.users
-    threads_collection = db.threads
-    messages_collection = db.messages
-except Exception as e:
-    st.error(f"❌ Connection to MongoDB failed: {e}")
-    st.stop()
-
-# Encryption Key Management
-ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
-if not ENCRYPTION_KEY:
-    try:
-        if "ENCRYPTION_KEY" in st.secrets:
-            ENCRYPTION_KEY = st.secrets["ENCRYPTION_KEY"]
+        MONGO_URI = st.secrets.get("MONGO_URI") or st.secrets.get("MONGODB_URL")
     except Exception:
         pass
 
+if not MONGO_URI:
+    st.error("🚨 `MONGO_URI` not found! Please check your `.env` file.")
+    st.stop()
+
+try:
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+    db = client.get_database("sentient_sql_db")
+    users_collection   = db.users
+    threads_collection = db.threads
+    messages_collection = db.messages
+except Exception as e:
+    st.error(f"❌ MongoDB connection failed: {e}")
+    st.stop()
+
+# ── Encryption ────────────────────────────────────────────────────────────────
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 if not ENCRYPTION_KEY:
-    # Generate a key if none exists (for dev/testing only - in prod this should be fixed)
-    # WARNING: This means data encrypted in this session won't be decryptable in the next if the key changes!
-    ENCRYPTION_KEY = Fernet.generate_key()
+    try:
+        ENCRYPTION_KEY = st.secrets.get("ENCRYPTION_KEY")
+    except Exception:
+        pass
+if not ENCRYPTION_KEY:
+    ENCRYPTION_KEY = Fernet.generate_key()  # Dev only fallback
 
 cipher_suite = Fernet(ENCRYPTION_KEY)
 
+
+def get_db():
+    """Exposes the MongoDB database object so other modules can get collections."""
+    return db
+
+
 def encrypt_string(text):
-    if not text: return None
+    if not text:
+        return None
     return cipher_suite.encrypt(text.encode()).decode()
 
+
 def decrypt_string(text):
-    if not text: return None
+    if not text:
+        return None
     return cipher_suite.decrypt(text.encode()).decode()
 
+
+# ── Auth ─────────────────────────────────────────────────────────────────────
 def sign_up(username, password):
     """Creates a new user."""
     if users_collection.find_one({"username": username}):
         return False, "Username already exists."
-    
-    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-    user_id = users_collection.insert_one({
-        "username": username,
-        "password": hashed_password
-    }).inserted_id
-    
+    hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    user_id = users_collection.insert_one({"username": username, "password": hashed}).inserted_id
     return True, str(user_id)
+
 
 def login(username, password):
     """Authenticates a user."""
@@ -91,72 +78,77 @@ def login(username, password):
         return True, str(user['_id'])
     return False, None
 
+
+# ── Thread Management ─────────────────────────────────────────────────────────
 def create_thread(user_id, title="New Chat"):
-    """Creates a new chat thread."""
-    # Find last thread to inherit connection
-    last_thread = threads_collection.find_one({"user_id": user_id}, sort=[("created_at", -1)])
-    db_conn_str = last_thread.get("db_connection_string") if last_thread else None
-    
+    """Creates a new chat thread. Each chat starts fresh — no inherited connection."""
     thread_id = threads_collection.insert_one({
         "user_id": user_id,
         "title": title,
         "created_at": datetime.utcnow(),
-        "db_connection_string": db_conn_str,
-        "active_table_name": None
+        "db_connection_string": None,       # Always starts blank — user must connect per chat
+        "active_table_name": None,
+        "mongo_collection_name": None,      # Feature 2: set when Excel is uploaded to MongoDB
     }).inserted_id
     return str(thread_id)
 
+
 def get_user_threads(user_id):
-    """Retrieves all threads for a user."""
+    """Returns all threads for a user, newest first."""
     return list(threads_collection.find({"user_id": user_id}).sort("created_at", -1))
 
+
 def delete_thread(thread_id):
-    """Deletes a thread and its messages."""
+    """Deletes a thread and all its messages."""
     from bson.objectid import ObjectId
     try:
-        # Delete messages first
         messages_collection.delete_many({"thread_id": str(thread_id)})
-        # Delete thread
         threads_collection.delete_one({"_id": ObjectId(thread_id)})
         return True
     except Exception as e:
         print(f"Error deleting thread: {e}")
         return False
 
-def update_thread_db(thread_id, db_connection_string, table_name=None):
-    """Updates the thread with the DB connection info."""
+
+def update_thread_db(thread_id, db_connection_string=None, table_name=None, mongo_collection=None):
+    """
+    Updates the thread's connection info.
+    - db_connection_string: SQL connection (encrypted at rest)
+    - table_name: active SQL table
+    - mongo_collection: Feature 2 — collection name for MongoDB mode
+    """
     from bson.objectid import ObjectId
-    
-    encrypted_conn = encrypt_string(db_connection_string)
-    update_data = {"db_connection_string": encrypted_conn}
-    if table_name:
+    update_data = {}
+    if db_connection_string is not None:
+        update_data["db_connection_string"] = encrypt_string(db_connection_string)
+    if table_name is not None:
         update_data["active_table_name"] = table_name
-        
-    result = threads_collection.update_one(
-        {"_id": ObjectId(thread_id)},
-        {"$set": update_data}
-    )
-    # Debug info
-    if result.modified_count == 0:
-        print(f"DEBUG: No document updated for thread_id {thread_id}")
+    if mongo_collection is not None:
+        update_data["mongo_collection_name"] = mongo_collection
+    if update_data:
+        threads_collection.update_one({"_id": ObjectId(thread_id)}, {"$set": update_data})
+
 
 def get_thread_details(thread_id):
-    """Gets thread details including decrypted connection string."""
+    """Returns thread document with decrypted SQL connection string."""
     from bson.objectid import ObjectId
     thread = threads_collection.find_one({"_id": ObjectId(thread_id)})
     if thread and thread.get("db_connection_string"):
         thread["decrypted_db_connection_string"] = decrypt_string(thread["db_connection_string"])
     return thread
 
+
+# ── Messages ──────────────────────────────────────────────────────────────────
 def add_message(thread_id, role, content):
-    """Adds a message to the thread history."""
+    """Saves a chat message to the thread history."""
     messages_collection.insert_one({
         "thread_id": thread_id,
         "role": role,
         "content": content,
-        "timestamp": datetime.utcnow()
+        "timestamp": datetime.utcnow(),
     })
 
+
 def get_messages(thread_id):
-    """Retrieves messages for a thread."""
+    """Returns all messages for a thread, ordered by time."""
     return list(messages_collection.find({"thread_id": thread_id}).sort("timestamp", 1))
