@@ -218,7 +218,7 @@ with st.expander(f"🔌 Connect to a Database  |  SQL: {sql_status}  |  MongoDB:
             "MongoDB URI",
             value=ext_mongo_uri or "",
             type="password",
-            placeholder="mongodb+srv://user:password@cluster.mongodb.net/dbname",
+            placeholder="mongodb+srv://<user>:<password>@cluster.mongodb.net/dbname",
             key="ext_mongo_uri_input",
         )
         ext_col_input = st.text_input(
@@ -298,7 +298,7 @@ with st.expander("📤 Upload Excel / CSV File", expanded=False):
         upload_mongo_uri = st.text_input(
             "MongoDB URI",
             type="password",
-            placeholder="mongodb+srv://user:password@cluster.mongodb.net/dbname",
+            placeholder="mongodb+srv://<user>:<password>@cluster.mongodb.net/dbname",
             key="upload_mongo_uri",
         )
         upload_mongo_col = st.text_input(
