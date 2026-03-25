@@ -24,8 +24,8 @@ if not MONGO_URI:
 try:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     db = client.get_database("sentient_sql_db")
-    users_collection   = db.users
-    threads_collection = db.threads
+    users_collection    = db.users
+    threads_collection  = db.threads
     messages_collection = db.messages
 except Exception as e:
     st.error(f"❌ MongoDB connection failed: {e}")
@@ -39,13 +39,13 @@ if not ENCRYPTION_KEY:
     except Exception:
         pass
 if not ENCRYPTION_KEY:
-    ENCRYPTION_KEY = Fernet.generate_key()  # Dev only fallback
+    ENCRYPTION_KEY = Fernet.generate_key()   # Dev-only fallback
 
 cipher_suite = Fernet(ENCRYPTION_KEY)
 
 
 def get_db():
-    """Exposes the MongoDB database object so other modules can get collections."""
+    """Exposes the internal MongoDB database object so other modules can get collections."""
     return db
 
 
@@ -61,34 +61,43 @@ def decrypt_string(text):
     return cipher_suite.decrypt(text.encode()).decode()
 
 
-# ── Auth ─────────────────────────────────────────────────────────────────────
+# ── Auth ──────────────────────────────────────────────────────────────────────
 def sign_up(username, password):
-    """Creates a new user."""
+    """Creates a new user. Password is bcrypt-hashed — never stored in plain text."""
     if users_collection.find_one({"username": username}):
         return False, "Username already exists."
-    hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
     user_id = users_collection.insert_one({"username": username, "password": hashed}).inserted_id
     return True, str(user_id)
 
 
 def login(username, password):
-    """Authenticates a user."""
+    """Authenticates a user using bcrypt comparison."""
     user = users_collection.find_one({"username": username})
-    if user and bcrypt.checkpw(password.encode('utf-8'), user['password']):
-        return True, str(user['_id'])
+    if user and bcrypt.checkpw(password.encode("utf-8"), user["password"]):
+        return True, str(user["_id"])
     return False, None
 
 
 # ── Thread Management ─────────────────────────────────────────────────────────
 def create_thread(user_id, title="New Chat"):
-    """Creates a new chat thread. Each chat starts fresh — no inherited connection."""
+    """
+    Creates a new chat thread. Every thread starts completely blank:
+    - db_connection_string     : SQL connection (encrypted at rest)
+    - active_table_name        : focused SQL table after upload
+    - mongo_collection_name    : internal Atlas collection (when file uploaded with no SQL)
+    - external_mongo_uri       : user's own MongoDB URI (encrypted at rest)  [NEW]
+    - external_mongo_collection: collection name in the user's own MongoDB   [NEW]
+    """
     thread_id = threads_collection.insert_one({
-        "user_id": user_id,
-        "title": title,
-        "created_at": datetime.utcnow(),
-        "db_connection_string": None,       # Always starts blank — user must connect per chat
-        "active_table_name": None,
-        "mongo_collection_name": None,      # Feature 2: set when Excel is uploaded to MongoDB
+        "user_id":                  user_id,
+        "title":                    title,
+        "created_at":               datetime.utcnow(),
+        "db_connection_string":     None,
+        "active_table_name":        None,
+        "mongo_collection_name":    None,
+        "external_mongo_uri":       None,   # NEW
+        "external_mongo_collection": None,  # NEW
     }).inserted_id
     return str(thread_id)
 
@@ -110,12 +119,22 @@ def delete_thread(thread_id):
         return False
 
 
-def update_thread_db(thread_id, db_connection_string=None, table_name=None, mongo_collection=None):
+def update_thread_db(
+    thread_id,
+    db_connection_string=None,
+    table_name=None,
+    mongo_collection=None,
+    external_mongo_uri=None,       # NEW
+    external_mongo_collection=None # NEW
+):
     """
-    Updates the thread's connection info.
-    - db_connection_string: SQL connection (encrypted at rest)
-    - table_name: active SQL table
-    - mongo_collection: Feature 2 — collection name for MongoDB mode
+    Updates the thread's connection / data-source info.
+
+    db_connection_string     : SQL URI — encrypted before saving
+    table_name               : active SQL table name
+    mongo_collection         : internal Atlas collection name (Flow B, no SQL)
+    external_mongo_uri       : user's own MongoDB URI — encrypted before saving  [NEW]
+    external_mongo_collection: collection inside user's own MongoDB              [NEW]
     """
     from bson.objectid import ObjectId
     update_data = {}
@@ -125,30 +144,41 @@ def update_thread_db(thread_id, db_connection_string=None, table_name=None, mong
         update_data["active_table_name"] = table_name
     if mongo_collection is not None:
         update_data["mongo_collection_name"] = mongo_collection
+    if external_mongo_uri is not None:                              # NEW
+        update_data["external_mongo_uri"] = encrypt_string(external_mongo_uri)
+    if external_mongo_collection is not None:                       # NEW
+        update_data["external_mongo_collection"] = external_mongo_collection
     if update_data:
         threads_collection.update_one({"_id": ObjectId(thread_id)}, {"$set": update_data})
 
 
 def get_thread_details(thread_id):
-    """Returns thread document with decrypted SQL connection string."""
+    """
+    Returns the thread document with:
+    - decrypted_db_connection_string : for SQL mode
+    - decrypted_external_mongo_uri   : for user's own MongoDB mode [NEW]
+    """
     from bson.objectid import ObjectId
     thread = threads_collection.find_one({"_id": ObjectId(thread_id)})
-    if thread and thread.get("db_connection_string"):
-        thread["decrypted_db_connection_string"] = decrypt_string(thread["db_connection_string"])
+    if thread:
+        if thread.get("db_connection_string"):
+            thread["decrypted_db_connection_string"] = decrypt_string(thread["db_connection_string"])
+        if thread.get("external_mongo_uri"):                        # NEW
+            thread["decrypted_external_mongo_uri"] = decrypt_string(thread["external_mongo_uri"])
     return thread
 
 
 # ── Messages ──────────────────────────────────────────────────────────────────
 def add_message(thread_id, role, content):
-    """Saves a chat message to the thread history."""
+    """Saves a chat message to the thread's message history."""
     messages_collection.insert_one({
         "thread_id": thread_id,
-        "role": role,
-        "content": content,
+        "role":      role,
+        "content":   content,
         "timestamp": datetime.utcnow(),
     })
 
 
 def get_messages(thread_id):
-    """Returns all messages for a thread, ordered by time."""
+    """Returns all messages for a thread, ordered by time ascending."""
     return list(messages_collection.find({"thread_id": thread_id}).sort("timestamp", 1))
