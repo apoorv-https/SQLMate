@@ -96,8 +96,9 @@ def create_thread(user_id, title="New Chat"):
         "db_connection_string":     None,
         "active_table_name":        None,
         "mongo_collection_name":    None,
-        "external_mongo_uri":       None,   # NEW
-        "external_mongo_collection": None,  # NEW
+        "external_mongo_uri":       None,
+        "external_mongo_collection": None,
+        "focused_tables":           [],      # Feature 14: multi-table selector
     }).inserted_id
     return str(thread_id)
 
@@ -124,17 +125,13 @@ def update_thread_db(
     db_connection_string=None,
     table_name=None,
     mongo_collection=None,
-    external_mongo_uri=None,       # NEW
-    external_mongo_collection=None # NEW
+    external_mongo_uri=None,
+    external_mongo_collection=None,
+    focused_tables=None,           # Feature 14
 ):
     """
     Updates the thread's connection / data-source info.
-
-    db_connection_string     : SQL URI — encrypted before saving
-    table_name               : active SQL table name
-    mongo_collection         : internal Atlas collection name (Flow B, no SQL)
-    external_mongo_uri       : user's own MongoDB URI — encrypted before saving  [NEW]
-    external_mongo_collection: collection inside user's own MongoDB              [NEW]
+    focused_tables: list of table names the user has chosen to focus on.
     """
     from bson.objectid import ObjectId
     update_data = {}
@@ -144,12 +141,23 @@ def update_thread_db(
         update_data["active_table_name"] = table_name
     if mongo_collection is not None:
         update_data["mongo_collection_name"] = mongo_collection
-    if external_mongo_uri is not None:                              # NEW
+    if external_mongo_uri is not None:
         update_data["external_mongo_uri"] = encrypt_string(external_mongo_uri)
-    if external_mongo_collection is not None:                       # NEW
+    if external_mongo_collection is not None:
         update_data["external_mongo_collection"] = external_mongo_collection
+    if focused_tables is not None:          # Feature 14
+        update_data["focused_tables"] = focused_tables
     if update_data:
         threads_collection.update_one({"_id": ObjectId(thread_id)}, {"$set": update_data})
+
+
+def update_thread_title(thread_id, title):  # Feature 15
+    """Updates the thread title (called after first user message)."""
+    from bson.objectid import ObjectId
+    threads_collection.update_one(
+        {"_id": ObjectId(thread_id)},
+        {"$set": {"title": title}}
+    )
 
 
 def get_thread_details(thread_id):

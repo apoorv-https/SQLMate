@@ -1,7 +1,7 @@
 # 🤖 SQLMate
 > **Your AI-Powered Data Assistant — Chat with SQL & MongoDB**
 
-**SQLMate** is a secure, multi-user SaaS application that lets you **chat with your databases in plain English**. Connect to an existing SQL or MongoDB database, or upload an Excel/CSV file — and start querying instantly without writing a single line of code.
+**SQLMate** is a secure, multi-user SaaS application that lets you **chat with your databases in plain English**. Connect to an existing SQL or MongoDB database, upload an Excel/CSV file, or spin up a Demo Database — and start querying instantly without writing a single line of code.
 
 ![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
@@ -10,42 +10,63 @@
 
 ---
 
-## ✨ Key Features
+## ✨ Features
 
-### 🔌 Dual Database Support
-- **SQL Mode** — Connect to any **PostgreSQL** or **MySQL** database via a raw connection string
-- **MongoDB Mode** — Connect to your own **MongoDB Atlas** cluster (URI + collection name)
-- Both modes support **direct connection** (no file upload needed) and **file upload**
+### 🔌 Dual Database Support (Full Parity)
+Both SQL and MongoDB modes support **identical features**, abstracting away their underlying query differences:
 
-### 📤 Smart File Upload (ETL Pipeline)
-Upload **Excel or CSV** files and SQLMate automatically:
-- 🗑️ Drops junk/summary rows (e.g. "Total", "Grand Total")
-- 📅 Standardizes date columns → `YYYY-MM-DD`
-- 🔢 Coerces mixed-type columns to numeric where possible
-- 🩹 Fills missing values (median for numbers, empty string for text)
-- Routes the cleaned data to your chosen **SQL table** or **MongoDB collection**
+| Feature | SQL | MongoDB |
+|---|:---:|:---:|
+| Natural language queries | ✅ | ✅ |
+| Conversation memory (last 10 turns) | ✅ | ✅ |
+| Ambiguity clarifier | ✅ | ✅ |
+| Multi-turn refinement | ✅ | ✅ |
+| Auto-retry on error | ✅ | ✅ |
+| Query/operation explanation | ✅ | ✅ |
+| Destructive op approval | ✅ | ✅ |
+| Chart visualization | ✅ | ✅ |
+| Result pagination (100/page) | ✅ | ✅ |
+| Thread auto-naming | ✅ | ✅ |
+| File upload (CSV/Excel) | ✅ | ✅ |
+| One-click Demo Database | ✅ | ❌ |
 
-### 🧠 AI Query Engine
-- **Natural Language → SQL / MongoDB** using **Llama 3.3 70B** via Groq
-- Schema-aware: automatically fetches table names, column names, and types before querying
-- Supports **focused table mode** — pin one table for more precise query generation
-- Dialect-aware: generates `ILIKE` for PostgreSQL, `LOWER()` for MySQL
+### 🧠 AI Engine
+- **Llama 3.3 70B** via Groq — generates SQL or PyMongo operations (including complex Aggregation Pipelines for NoSQL).
+- **FK-aware schema** — foreign keys and primary keys injected into context for accurate SQL JOINs.
+- **Conversation memory** — last 10 chat turns sent with every LLM call for seamless follow-up questions.
+- **Ambiguity clarifier** — asks a follow-up question before generating a query if the intent is unclear.
+- **Multi-turn refinement** — *"now only top 5"* updates the previous query instead of forcing you to repeat yourself.
+- **Auto-retry** — if a query fails, the error is sent back to the LLM to self-correct automatically.
+- **Query explanation** — plain English explanation of every generated query/operation.
 
-### 📊 Chart Visualization
-- Automatically detects chart requests (e.g. *"show me a bar chart of sales by region"*)
-- Renders **bar, line, pie, scatter** charts using Plotly
-- Summarizes the chart type chosen in chat history
+### 📤 ETL Pipeline
+Upload **Excel or CSV** → automatic preprocessing:
+- 🗑️ Drop junk/summary rows ("Total", "Grand Total")
+- 📅 Standardize date columns → `YYYY-MM-DD`
+- 🔢 Coerce mixed-type columns to numeric
+- 🩹 Fill missing values (median for numbers, empty string for text)
 
-### 🛡️ Safety First — "The Safety Sandwich"
-- Every generated query is scanned for **destructive operations**: `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `INSERT`
-- Flagged queries **pause for human approval** — shows a preview of affected rows before execution
-- Works identically for both SQL queries and MongoDB operations
-- All database credentials are **encrypted with Fernet** (symmetric encryption) before storage
+### 🛡️ Safety First
+- Destructive operations (`DELETE`, `UPDATE`, `DROP`, MongoDB `delete`/`update`) always require **human approval**.
+- Preview of affected rows or filters shown before execution.
+- All database credentials encrypted with **Fernet** (symmetric AES encryption) before storage.
 
-### 💬 Persistent Multi-User Chat
-- User accounts with login / sign-up
-- Each **chat thread** stores its own DB connection, active table, and full message history
-- Thread management: create, switch, and delete chats from the sidebar
+### 📊 Visualization
+- Auto-detects chart requests (*"show a bar chart of..."*).
+- Renders **bar, line, pie, scatter, histogram** charts via Plotly.
+- **Smart Dataframe Sanitization**: Automatically cleans unhashable NoSQL arrays and dictionaries so Plotly never crashes on complex MongoDB outputs.
+- **Auto-Fallback**: If the LLM rate-limits or fails to define axes, the engine auto-infers from the DataFrame structure.
+
+### 📐 Schema & Testing Tools
+- **Demo Database** — Instantly spin up a local SQLite database populated with sample tables (Employees, Departments) for users without credentials.
+- **Multi-table selector** — choose which SQL tables the AI has access to.
+- **SQLite support** — drag and drop a `.db` file, no server needed.
+
+### 💬 Chat Management
+- Multi-user auth (Bcrypt password hashing).
+- Persistent chat threads per user (stored securely in MongoDB Atlas).
+- **Auto-named threads** — title generated quickly from your first question.
+- Create, switch, and delete chat threads from the sidebar.
 
 ---
 
@@ -68,65 +89,50 @@ Upload **Excel or CSV** files and SQLMate automatically:
 
 ### Prerequisites
 - Python 3.10+
-- A **MongoDB Atlas** cluster (Free Tier works)
+- A **MongoDB Atlas** cluster (Free Tier works perfectly)
 - A **Groq API Key** — get one free at [console.groq.com](https://console.groq.com/)
 
 ### Installation
 
-1. **Clone the repository**:
-    ```bash
-    git clone https://github.com/your-username/sqlmate.git
-    cd sqlmate
-    ```
+```bash
+git clone https://github.com/your-username/sqlmate.git
+cd sqlmate
+python -m venv venv
+venv\Scripts\activate      # Windows
+pip install -r requirements.txt
+```
 
-2. **Create a virtual environment**:
-    ```bash
-    python -m venv venv
-    # Windows
-    venv\Scripts\activate
-    # Mac/Linux
-    source venv/bin/activate
-    ```
+Create a `.env` file:
+```
+GROQ_API_KEY=gsk_...
+MONGO_URI=mongodb+srv://<user>:<password>@cluster.mongodb.net/dbname
+ENCRYPTION_KEY=<generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())">
+```
 
-3. **Install dependencies**:
-    ```bash
-    pip install -r requirements.txt
-    ```
+Run the app:
+```bash
+streamlit run app.py
+```
 
-4. **Configure environment variables** — create a `.env` file:
-    ```
-    GROQ_API_KEY=gsk_...
-    MONGO_URI=mongodb+srv://<user>:<password>@cluster.mongodb.net/dbname
-    ENCRYPTION_KEY=<generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())">
-    ```
-
-5. **Run the app**:
-    ```bash
-    streamlit run app.py
-    ```
+> **Supabase users:** Use the **Session Pooler** connection string (port `6543`) from your Supabase Dashboard → Connect, not the direct connection.
 
 ---
 
-## 🔁 Two Ways to Use SQLMate
+## 🔁 Three Ways to Connect
 
-### Flow A — Connect to an Existing Database
-1. Open a new chat
-2. Paste your **SQL connection string** or **MongoDB URI + collection name**
-3. Start chatting — SQLMate reads your schema automatically
+**Flow A — Existing Database**
+1. Open a new chat → paste your SQL/MongoDB connection string → start chatting.
 
-### Flow B — Upload a File
-1. Open a new chat
-2. Go to **Upload Excel / CSV**
-3. Choose destination: **SQL Database** or **MongoDB**
-4. Provide the target connection string
-5. SQLMate cleans and uploads the file, then connects automatically
+**Flow B — Upload a File**
+1. Open a new chat → Upload Excel/CSV → choose SQL or MongoDB destination → SQLMate cleans, uploads, and connects automatically.
+
+**Flow C — Try the Demo**
+1. Open a new chat → click "**✨ Try Demo Database**" to instantly connect to an auto-generated sample SQL database.
 
 ---
 
 ## ☁️ Deployment
-
-Deploy for free on **Streamlit Community Cloud**:
-👉 **[Read the Deployment Guide (DEPLOYMENT.md)](DEPLOYMENT.md)**
+Ready to be deployed for free on **Streamlit Community Cloud** or Render.
 
 ---
 
