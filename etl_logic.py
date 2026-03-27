@@ -1,6 +1,76 @@
 import re
 import pandas as pd
 from sqlalchemy import create_engine, text
+import json
+from langchain_groq import ChatGroq
+from langchain_core.messages import SystemMessage, HumanMessage
+
+
+# ── Smart Column Generation ───────────────────────────────────────────────────
+def enhance_column_names(df):
+    """
+    Uses the Groq LLM to detect if columns are missing or meaningless (e.g., 'Unnamed: X', or raw data).
+    If so, it generates descriptive column names based on the first few rows of data.
+    """
+    needs_fix = False
+    for c in df.columns:
+        c_str = str(c).lower().strip()
+        if "unnamed" in c_str or "untitled" in c_str or c_str.isdigit() or c_str.startswith("column"):
+            needs_fix = True
+            break
+
+    if not needs_fix:
+        return df, False
+
+    try:
+        llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+        # Use simple str cast for date objects etc
+        sample_data = df.head(5).astype(str).to_dict(orient="records")
+        current_cols = list(df.columns)
+        
+        system_prompt = (
+            "You are a data engineering assistant. A user uploaded a dataset, but the column headers "
+            "are missing or meaningless. The current parsed headers might actually be the first row of data!\n"
+            "Please analyze the provided sample data and suggest short, descriptive column names (snake_case).\n\n"
+            "Return ONLY a valid JSON array of strings representing the new column names, in the exact same order as the provided data columns.\n"
+            "Do not include any markdown formatting aside from the JSON block, or extra text."
+        )
+        
+        human_prompt = f"Current Parsed Columns: {current_cols}\n\nSample Data (First 5 rows):\n{json.dumps(sample_data, indent=2, default=str)}"
+        
+        messages = [SystemMessage(content=system_prompt), HumanMessage(content=human_prompt)]
+        response = llm.invoke(messages)
+        
+        content = response.content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+        
+        new_cols = json.loads(content)
+        
+        if len(new_cols) == len(df.columns):
+            is_data_row = True
+            for c in df.columns:
+                c_str = str(c).lower().strip()
+                if "unnamed" in c_str or c_str.startswith("column") or c_str.isdigit() or "untitled" in c_str:
+                    is_data_row = False
+                    break
+            
+            if is_data_row:
+                push_down_row = {new_cols[i]: col_val for i, col_val in enumerate(df.columns)}
+                df.columns = new_cols
+                row_df = pd.DataFrame([push_down_row])
+                df = pd.concat([row_df, df], ignore_index=True)
+            else:
+                df.columns = new_cols
+
+            return df, True
+        return df, False
+    except Exception as e:
+        print("LLM Column Enhancement Error:", e)
+        return df, False
 
 
 # ── Column Name Sanitizer ─────────────────────────────────────────────────────
@@ -100,6 +170,8 @@ def _build_report_message(report):
         parts.append(f"🔢 Fixed {report['numeric_cols_fixed']} mixed-type column(s) → numeric")
     if report["nulls_filled"] > 0:
         parts.append(f"🩹 Filled {report['nulls_filled']} empty cell(s)")
+    if report.get("columns_auto_generated"):
+        parts.append("✨ AI auto-generated column names")
     return "  |  ".join(parts) if parts else "✅ Data looks clean — no issues found."
 
 
@@ -123,12 +195,19 @@ def upload_file_to_sql(file_obj, db_connection_string):
         else:
             return False, "Unsupported format. Please upload CSV or Excel.", ""
 
-        df = clean_column_names(df)
         if df.empty:
             return False, "The uploaded file has no data.", ""
 
+        # ── AI Auto-Detect Columns ───────────────────────────────────────────
+        df, columns_generated = enhance_column_names(df)
+
+        df = clean_column_names(df)
+
         # ── Preprocess ───────────────────────────────────────────────────────
         df, report = preprocess_dataframe(df)
+        if columns_generated:
+            report["columns_auto_generated"] = True
+            
         report_msg = _build_report_message(report)
 
         engine = create_engine(db_connection_string, isolation_level="AUTOCOMMIT")
@@ -163,12 +242,19 @@ def upload_file_to_mongo(file_obj, mongo_collection):
         else:
             return False, "Unsupported format. Please upload CSV or Excel.", ""
 
-        df = clean_column_names(df)
         if df.empty:
             return False, "The uploaded file has no data.", ""
 
+        # ── AI Auto-Detect Columns ───────────────────────────────────────────
+        df, columns_generated = enhance_column_names(df)
+
+        df = clean_column_names(df)
+
         # ── Preprocess ───────────────────────────────────────────────────────
         df, report = preprocess_dataframe(df)
+        if columns_generated:
+            report["columns_auto_generated"] = True
+            
         report_msg = _build_report_message(report)
 
         # Convert DataFrame rows → list of dicts (MongoDB documents)
