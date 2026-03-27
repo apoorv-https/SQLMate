@@ -240,6 +240,8 @@ with st.expander(f"🔌 Connect to a Database  |  SQL: {sql_status}  |  MongoDB:
                 cs = sql_conn_input.strip()
                 if "localhost" in cs or "127.0.0.1" in cs:
                     st.warning("⚠️ 'localhost' detected. Use a cloud DB when deployed.")
+                elif "supabase.co" in cs and ":5432" in cs:
+                    st.warning("⚠️ **Supabase Port Detected (5432):** This may fail on deployed apps due to IPv4/IPv6 compatibility. We strongly recommend using the **Transaction pooler** port (`6543`) from your Supabase dashboard.")
                 try:
                     from sqlalchemy import create_engine, text as sa_text
                     engine = create_engine(cs)
@@ -284,6 +286,20 @@ with st.expander(f"🔌 Connect to a Database  |  SQL: {sql_status}  |  MongoDB:
             placeholder="mongodb+srv://<user>:<password>@cluster.mongodb.net/dbname",
             key="ext_mongo_uri_input",
         )
+        
+        if ext_uri_input.strip() and st.button("Fetch Available Collections", key="btn_fetch_mongo_cols_conn"):
+            try:
+                from pymongo import MongoClient as _MC
+                temp_client = _MC(ext_uri_input.strip(), serverSelectionTimeoutMS=5000)
+                temp_db = temp_client.get_default_database()
+                cols = temp_db.list_collection_names()
+                if cols:
+                    st.success(f"Collections found: `{', '.join(cols)}`")
+                else:
+                    st.info("No collections found in this database.")
+            except Exception as e:
+                st.error(f"❌ Failed to fetch collections: {e}")
+
         ext_col_input = st.text_input(
             "Collection Name",
             value=ext_mongo_col or "",
@@ -407,6 +423,20 @@ with st.expander("📤 Upload Excel / CSV File", expanded=False):
             placeholder="mongodb+srv://<user>:<password>@cluster.mongodb.net/dbname",
             key="upload_mongo_uri",
         )
+        
+        if upload_mongo_uri.strip() and st.button("Fetch Available Collections", key="btn_fetch_mongo_cols_upload"):
+            try:
+                from pymongo import MongoClient as _MC
+                temp_client = _MC(upload_mongo_uri.strip(), serverSelectionTimeoutMS=5000)
+                temp_db = temp_client.get_default_database()
+                cols = temp_db.list_collection_names()
+                if cols:
+                    st.success(f"Collections found: `{', '.join(cols)}`")
+                else:
+                    st.info("No collections found in this database.")
+            except Exception as e:
+                st.error(f"❌ Failed to fetch collections: {e}")
+
         upload_mongo_col = st.text_input(
             "Collection Name",
             placeholder="my_collection",
@@ -426,6 +456,8 @@ with st.expander("📤 Upload Excel / CSV File", expanded=False):
 
                 if store_in == "SQL Database":
                     cs = upload_sql_conn.strip()
+                    if "supabase.co" in cs and ":5432" in cs:
+                        st.warning("⚠️ **Supabase Port Detected (5432):** This may fail on deployed apps due to IPv4/IPv6 compatibility. Please use the **Transaction pooler** port (`6543`).")
                     success, result, report_msg = etl_logic.upload_file_to_sql(uploaded_file, cs)
                     if success:
                         auth_mongo.update_thread_db(
